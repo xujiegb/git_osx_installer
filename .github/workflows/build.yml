@@ -42,7 +42,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Homebrew exists on GitHub macOS runners, but PATH may vary.
           if command -v brew >/dev/null 2>&1; then
             BREW="$(command -v brew)"
           elif [[ -x /opt/homebrew/bin/brew ]]; then
@@ -53,18 +52,15 @@ jobs:
             echo "brew not found" >&2
             exit 1
           fi
+
           echo "Using brew: $BREW"
           "$BREW" update
           "$BREW" install openssl@3 pkg-config
 
-          # Export env for later steps (for logging / optional use)
           OPENSSL_PREFIX="$("$BREW" --prefix openssl@3)"
           echo "OPENSSL_PREFIX=$OPENSSL_PREFIX" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$OPENSSL_PREFIX/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "CPPFLAGS=-I$OPENSSL_PREFIX/include" >> "$GITHUB_ENV"
-          echo "LDFLAGS=-L$OPENSSL_PREFIX/lib" >> "$GITHUB_ENV"
+          echo "BREW=$BREW" >> "$GITHUB_ENV"
 
-          echo "openssl prefix: $OPENSSL_PREFIX"
           ls -lah "$OPENSSL_PREFIX/include/openssl/ssl.h"
 
       - name: Resolve Git VERSION
@@ -81,39 +77,64 @@ jobs:
               | sort -V \
               | tail -n1 || true)"
           fi
-          [[ -n "$VER" ]]
+          if [[ -z "$VER" ]]; then
+            echo "ERROR: Unable to resolve Git version." >&2
+            exit 1
+          fi
+          echo "Resolved VERSION=$VER"
           echo "VERSION=$VER" >> "$GITHUB_OUTPUT"
+
+      # CI-only patch: ensure osxkeychain builds with:
+      # - Git source headers (git-compat-util.h etc)
+      # - OpenSSL headers+libs (openssl/ssl.h, -lssl -lcrypto)
+      # - zlib + iconv + macOS frameworks (Security/CoreFoundation)
+      - name: Patch Makefile for osxkeychain (CI only)
+        shell: bash
+        env:
+          OPENSSL_PREFIX: ${{ env.OPENSSL_PREFIX }}
+        run: |
+          set -euo pipefail
+          OPENSSL_INC="-I${OPENSSL_PREFIX}/include"
+          OPENSSL_LIB="-L${OPENSSL_PREFIX}/lib"
+
+          # Replace the osx-built-keychain recipe line to inject flags robustly.
+          # We match the line that enters contrib/credential/osxkeychain and runs $(SUBMAKE_${*})
+          # and append needed CPPFLAGS/LDFLAGS/LIBS.
+          perl -0pi -e '
+            my $inc = $ENV{"OPENSSL_INC"};
+            my $lib = $ENV{"OPENSSL_LIB"};
+            $inc =~ s/"/\\"/g; $lib =~ s/"/\\"/g;
+
+            s{
+              cd\ "\$\(BUILD_DIR\)/git-\$\*/contrib/credential/osxkeychain";\s*\$\(SUBMAKE_\$\{\*\}\)\s*([^\n]*)
+            }{
+              qq{cd "\$(BUILD_DIR)/git-\$*/contrib/credential/osxkeychain"; \$(SUBMAKE_\${*}) CPPFLAGS="-I\$(PWD)/\$(BUILD_DIR)/git-\$* $inc" LDFLAGS="\$(LDFLAGS_\${*}) $lib" LIBS="-lz -liconv -lssl -lcrypto -framework Security -framework CoreFoundation" $1}
+            }gexm;
+          ' Makefile
+
+          # Export for perl patch
+          echo "OPENSSL_INC=$OPENSSL_INC" >> "$GITHUB_ENV"
+          echo "OPENSSL_LIB=$OPENSSL_LIB" >> "$GITHUB_ENV"
+
+          # Show the patched keychain rule vicinity for sanity
+          grep -n "osx-built-keychain" -n Makefile || true
+          nl -ba Makefile | sed -n '80,110p'
 
       - name: Build package
         shell: bash
         env:
           VERSION: ${{ steps.ver.outputs.VERSION }}
+          OPENSSL_PREFIX: ${{ env.OPENSSL_PREFIX }}
         run: |
           set -euo pipefail
-
-          # Find brew (again, in case PATH differs across steps)
-          if command -v brew >/dev/null 2>&1; then
-            BREW="$(command -v brew)"
-          elif [[ -x /opt/homebrew/bin/brew ]]; then
-            BREW="/opt/homebrew/bin/brew"
-          elif [[ -x /usr/local/bin/brew ]]; then
-            BREW="/usr/local/bin/brew"
-          else
-            echo "brew not found" >&2
-            exit 1
-          fi
-
-          OPENSSL_PREFIX="$("$BREW" --prefix openssl@3)"
           OPENSSL_INC="-I${OPENSSL_PREFIX}/include"
           OPENSSL_LIB="-L${OPENSSL_PREFIX}/lib"
 
           echo "Using VERSION=$VERSION"
           echo "Using OPENSSL_PREFIX=$OPENSSL_PREFIX"
-          echo "Injecting OPENSSL_INC=$OPENSSL_INC"
-          echo "Injecting OPENSSL_LIB=$OPENSSL_LIB"
-          ls -lah "${OPENSSL_PREFIX}/include/openssl/ssl.h"
 
-          # Force GNU make, override arch flags to include OpenSSL include/lib paths
+          # Force GNU make, and also inject OpenSSL include/lib into arch flags
+          # so the rest of Git build (and keychain helper) can find them.
           "$HOME/gmake/bin/make" clean VERSION="$VERSION" || true
 
           "$HOME/gmake/bin/make" package VERSION="$VERSION" \
@@ -121,6 +142,18 @@ jobs:
             LDFLAGS_arm="-target arm64-apple-macos11 ${OPENSSL_LIB}" \
             CFLAGS_intel="-target x86_64-apple-macos10.12 ${OPENSSL_INC}" \
             LDFLAGS_intel="-target x86_64-apple-macos10.12 ${OPENSSL_LIB}"
+
+      - name: List outputs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lah
+          ls -lah build || true
+          ls -lah tmp || true
+          ls -lah stage || true
+          ls -lah stage-arm || true
+          ls -lah stage-intel || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
