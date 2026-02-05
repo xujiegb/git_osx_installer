@@ -93,7 +93,8 @@ $(BUILD_DIR)/git-%/osx-built-git: $(BUILD_DIR)/git-%/Makefile
 	touch "$@"
 
 $(BUILD_DIR)/git-%/osx-built-keychain: $(BUILD_DIR)/git-%/Makefile
-	cd "$(BUILD_DIR)/git-$*/contrib/credential/osxkeychain"; $(SUBMAKE_${*}) CFLAGS="$(CFLAGS_${*}) -g -O2"
+	cd "$(BUILD_DIR)/git-$*/contrib/credential/osxkeychain"; \
+      $(SUBMAKE_${*}) CPPFLAGS="-I$(PWD)/$(BUILD_DIR)/git-$*" CFLAGS="$(CFLAGS_${*}) -g -O2"
 	touch "$@"
 
 ifdef INCLUDE_SUBTREE_DOC
