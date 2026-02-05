@@ -17,17 +17,23 @@ jobs:
 
       - name: Show environment
         run: |
+          set -euxo pipefail
           sw_vers
           uname -a
           xcode-select -p || true
           clang --version || true
           make --version || true
 
-      - name: Build installer package
+      - name: Debug Makefile around the failing line
         run: |
           set -euxo pipefail
-          make clean || true
-          make package
+          nl -ba Makefile | sed -n '35,55p'
+
+      - name: Build installer package (override XML_CATALOG_FILES)
+        run: |
+          set -euxo pipefail
+          make clean XML_CATALOG_FILES= || true
+          make package XML_CATALOG_FILES=
 
       - name: List outputs
         if: always()
