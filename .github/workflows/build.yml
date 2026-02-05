@@ -15,7 +15,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build GNU make 4.4.1 (no Homebrew needed)
+      - name: Build GNU make 4.4.1
         shell: bash
         run: |
           set -euo pipefail
@@ -29,7 +29,7 @@ jobs:
           /usr/bin/make install
           "$HOME/gmake/bin/make" --version
 
-      - name: Ensure XML catalog paths exist (Makefile parse-time)
+      - name: Ensure XML catalog paths exist
         shell: bash
         run: |
           set -euo pipefail
@@ -38,7 +38,7 @@ jobs:
           sudo mkdir -p /opt/homebrew/etc/xml
           sudo touch /opt/homebrew/etc/xml/catalog
 
-      - name: Install OpenSSL (Homebrew)
+      - name: Install OpenSSL
         shell: bash
         run: |
           set -euo pipefail
@@ -52,15 +52,11 @@ jobs:
             echo "brew not found" >&2
             exit 1
           fi
-
-          echo "Using brew: $BREW"
           "$BREW" update
           "$BREW" install openssl@3 pkg-config
-
           OPENSSL_PREFIX="$("$BREW" --prefix openssl@3)"
           echo "OPENSSL_PREFIX=$OPENSSL_PREFIX" >> "$GITHUB_ENV"
           echo "BREW=$BREW" >> "$GITHUB_ENV"
-
           ls -lah "$OPENSSL_PREFIX/include/openssl/ssl.h"
 
       - name: Resolve Git VERSION
@@ -81,14 +77,9 @@ jobs:
             echo "ERROR: Unable to resolve Git version." >&2
             exit 1
           fi
-          echo "Resolved VERSION=$VER"
           echo "VERSION=$VER" >> "$GITHUB_OUTPUT"
 
-      # CI-only patch: ensure osxkeychain builds with:
-      # - Git source headers (git-compat-util.h etc)
-      # - OpenSSL headers+libs (openssl/ssl.h, -lssl -lcrypto)
-      # - zlib + iconv + macOS frameworks (Security/CoreFoundation)
-      - name: Patch Makefile for osxkeychain (CI only)
+      - name: Patch Makefile for osxkeychain
         shell: bash
         env:
           OPENSSL_PREFIX: ${{ env.OPENSSL_PREFIX }}
@@ -96,29 +87,18 @@ jobs:
           set -euo pipefail
           OPENSSL_INC="-I${OPENSSL_PREFIX}/include"
           OPENSSL_LIB="-L${OPENSSL_PREFIX}/lib"
-
-          # Replace the osx-built-keychain recipe line to inject flags robustly.
-          # We match the line that enters contrib/credential/osxkeychain and runs $(SUBMAKE_${*})
-          # and append needed CPPFLAGS/LDFLAGS/LIBS.
           perl -0pi -e '
             my $inc = $ENV{"OPENSSL_INC"};
             my $lib = $ENV{"OPENSSL_LIB"};
             $inc =~ s/"/\\"/g; $lib =~ s/"/\\"/g;
-
             s{
               cd\ "\$\(BUILD_DIR\)/git-\$\*/contrib/credential/osxkeychain";\s*\$\(SUBMAKE_\$\{\*\}\)\s*([^\n]*)
             }{
-              qq{cd "\$(BUILD_DIR)/git-\$*/contrib/credential/osxkeychain"; \$(SUBMAKE_\${*}) CPPFLAGS="-I\$(PWD)/\$(BUILD_DIR)/git-\$* $inc" LDFLAGS="\$(LDFLAGS_\${*}) $lib" LIBS="-lz -liconv -lssl -lcrypto -framework Security -framework CoreFoundation" $1}
+              qq{cd "\$(BUILD_DIR)/git-\$*/contrib/credential/osxkeychain"; \$(SUBMAKE_\${*}) CPPFLAGS="-I\$(PWD)/\$(BUILD_DIR)/git-\$* $inc" LDFLAGS="\$(LDFLAGS_\${*}) $lib -lz -liconv -framework Security -framework CoreFoundation -lssl -lcrypto" $1}
             }gexm;
           ' Makefile
-
-          # Export for perl patch
           echo "OPENSSL_INC=$OPENSSL_INC" >> "$GITHUB_ENV"
           echo "OPENSSL_LIB=$OPENSSL_LIB" >> "$GITHUB_ENV"
-
-          # Show the patched keychain rule vicinity for sanity
-          grep -n "osx-built-keychain" -n Makefile || true
-          nl -ba Makefile | sed -n '80,110p'
 
       - name: Build package
         shell: bash
@@ -129,19 +109,13 @@ jobs:
           set -euo pipefail
           OPENSSL_INC="-I${OPENSSL_PREFIX}/include"
           OPENSSL_LIB="-L${OPENSSL_PREFIX}/lib"
-
-          echo "Using VERSION=$VERSION"
-          echo "Using OPENSSL_PREFIX=$OPENSSL_PREFIX"
-
-          # Force GNU make, and also inject OpenSSL include/lib into arch flags
-          # so the rest of Git build (and keychain helper) can find them.
+          KEYCHAIN_LINK="-lz -liconv -framework Security -framework CoreFoundation -lssl -lcrypto"
           "$HOME/gmake/bin/make" clean VERSION="$VERSION" || true
-
           "$HOME/gmake/bin/make" package VERSION="$VERSION" \
             CFLAGS_arm="-target arm64-apple-macos11 ${OPENSSL_INC}" \
-            LDFLAGS_arm="-target arm64-apple-macos11 ${OPENSSL_LIB}" \
-            CFLAGS_intel="-target x86_64-apple-macos10.12 ${OPENSSL_INC}" \
-            LDFLAGS_intel="-target x86_64-apple-macos10.12 ${OPENSSL_LIB}"
+            LDFLAGS_arm="-target arm64-apple-macos11 ${OPENSSL_LIB} ${KEYCHAIN_LINK}" \
+            CFLAGS_intel="-target x86_64-apple-macos10.13 ${OPENSSL_INC}" \
+            LDFLAGS_intel="-target x86_64-apple-macos10.13 ${OPENSSL_LIB} ${KEYCHAIN_LINK}"
 
       - name: List outputs
         if: always()
