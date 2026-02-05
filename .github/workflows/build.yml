@@ -26,10 +26,8 @@ jobs:
           ./configure --prefix="$HOME/gmake"
           /usr/bin/make -j"$(sysctl -n hw.ncpu)"
           /usr/bin/make install
-          echo "$HOME/gmake/bin" >> "$GITHUB_PATH"
-          make --version
+          "$HOME/gmake/bin/make" --version
 
-      # Optional but harmless: satisfy xml catalog lookup if your scripts ever use it
       - name: Provision XML catalog paths
         run: |
           set -euxo pipefail
@@ -40,25 +38,28 @@ jobs:
           ls -lah /usr/local/etc/xml/catalog
           ls -lah /opt/homebrew/etc/xml/catalog
 
-      - name: Resolve VERSION safely
+      - name: Resolve VERSION safely (POSIX debug)
         id: ver
         run: |
           set -euxo pipefail
           echo "Raw output from bin/latest-git-version:"
-          bin/latest-git-version | cat -A
-          VER="$(bin/latest-git-version | tr -d '\r' | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
+          bin/latest-git-version || true
+          # Parse first X.Y.Z from whatever it prints
+          VER="$(bin/latest-git-version 2>/dev/null | tr -d '\r' | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
           if [[ -z "$VER" ]]; then
+            # Fallback: avoid relying on the script at all
+            # (Still no repo changes; just use a known tag or fail clearly)
             echo "Failed to parse VERSION from bin/latest-git-version output" >&2
             exit 1
           fi
           echo "Resolved VERSION=$VER"
           echo "VERSION=$VER" >> "$GITHUB_OUTPUT"
 
-      - name: Build installer package (override VERSION)
+      - name: Build installer package (force GNU make, override VERSION)
         run: |
           set -euxo pipefail
-          make clean VERSION='${{ steps.ver.outputs.VERSION }}' || true
-          make package VERSION='${{ steps.ver.outputs.VERSION }}'
+          "$HOME/gmake/bin/make" clean VERSION='${{ steps.ver.outputs.VERSION }}' || true
+          "$HOME/gmake/bin/make" package VERSION='${{ steps.ver.outputs.VERSION }}'
 
       - name: List outputs
         if: always()
