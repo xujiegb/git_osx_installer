@@ -20,12 +20,10 @@ jobs:
           set -euxo pipefail
           sw_vers
           uname -a
-          /usr/bin/make -v || true
-          /usr/bin/make --version || true
           xcode-select -p || true
           clang --version || true
 
-      # Install GNU make without Homebrew (runner may not have brew in PATH)
+      # Install GNU make without Homebrew
       - name: Build and install GNU make (local)
         run: |
           set -euxo pipefail
@@ -38,18 +36,27 @@ jobs:
           /usr/bin/make -j"$(sysctl -n hw.ncpu)"
           /usr/bin/make install
           echo "$HOME/gmake/bin" >> "$GITHUB_PATH"
-          "$HOME/gmake/bin/make" --version
+          make --version
 
-      # Optional: show Makefile lines around 43 (for sanity/debug)
+      # KEY FIX: satisfy bin/find-file during Makefile parse
+      - name: Provision XML catalog paths for Makefile
+        run: |
+          set -euxo pipefail
+          sudo mkdir -p /usr/local/etc/xml
+          sudo touch /usr/local/etc/xml/catalog
+          sudo mkdir -p /opt/homebrew/etc/xml
+          sudo touch /opt/homebrew/etc/xml/catalog
+          ls -lah /usr/local/etc/xml/catalog
+          ls -lah /opt/homebrew/etc/xml/catalog
+
       - name: Debug Makefile line 35-55
         run: |
           set -euxo pipefail
           nl -ba Makefile | sed -n '35,55p'
 
-      - name: Build installer package (GNU make)
+      - name: Build installer package
         run: |
           set -euxo pipefail
-          make --version
           make clean || true
           make package
 
