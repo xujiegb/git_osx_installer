@@ -15,15 +15,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show toolchain
-        run: |
-          set -euxo pipefail
-          sw_vers
-          uname -a
-          xcode-select -p || true
-          clang --version || true
-
-      # Install GNU make without Homebrew
       - name: Build and install GNU make (local)
         run: |
           set -euxo pipefail
@@ -38,8 +29,8 @@ jobs:
           echo "$HOME/gmake/bin" >> "$GITHUB_PATH"
           make --version
 
-      # KEY FIX: satisfy bin/find-file during Makefile parse
-      - name: Provision XML catalog paths for Makefile
+      # Optional but harmless: satisfy xml catalog lookup if your scripts ever use it
+      - name: Provision XML catalog paths
         run: |
           set -euxo pipefail
           sudo mkdir -p /usr/local/etc/xml
@@ -49,16 +40,25 @@ jobs:
           ls -lah /usr/local/etc/xml/catalog
           ls -lah /opt/homebrew/etc/xml/catalog
 
-      - name: Debug Makefile line 35-55
+      - name: Resolve VERSION safely
+        id: ver
         run: |
           set -euxo pipefail
-          nl -ba Makefile | sed -n '35,55p'
+          echo "Raw output from bin/latest-git-version:"
+          bin/latest-git-version | cat -A
+          VER="$(bin/latest-git-version | tr -d '\r' | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
+          if [[ -z "$VER" ]]; then
+            echo "Failed to parse VERSION from bin/latest-git-version output" >&2
+            exit 1
+          fi
+          echo "Resolved VERSION=$VER"
+          echo "VERSION=$VER" >> "$GITHUB_OUTPUT"
 
-      - name: Build installer package
+      - name: Build installer package (override VERSION)
         run: |
           set -euxo pipefail
-          make clean || true
-          make package
+          make clean VERSION='${{ steps.ver.outputs.VERSION }}' || true
+          make package VERSION='${{ steps.ver.outputs.VERSION }}'
 
       - name: List outputs
         if: always()
