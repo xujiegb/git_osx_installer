@@ -10,18 +10,18 @@ on:
 jobs:
   build:
     runs-on: macos-14
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build and install GNU make (local)
+      - name: Build GNU make 4.4.1 (no Homebrew)
+        shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           MAKE_VER="4.4.1"
           cd "$RUNNER_TEMP"
-          curl -fsSL -o make.tar.gz "https://ftp.gnu.org/gnu/make/make-${MAKE_VER}.tar.gz"
-          tar xzf make.tar.gz
+          curl -fsSL -o "make-${MAKE_VER}.tar.gz" "https://ftp.gnu.org/gnu/make/make-${MAKE_VER}.tar.gz"
+          tar xzf "make-${MAKE_VER}.tar.gz"
           cd "make-${MAKE_VER}"
           ./configure --prefix="$HOME/gmake"
           /usr/bin/make -j"$(sysctl -n hw.ncpu)"
@@ -29,8 +29,9 @@ jobs:
           "$HOME/gmake/bin/make" --version
 
       - name: Provision XML catalog paths
+        shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           sudo mkdir -p /usr/local/etc/xml
           sudo touch /usr/local/etc/xml/catalog
           sudo mkdir -p /opt/homebrew/etc/xml
@@ -38,41 +39,43 @@ jobs:
           ls -lah /usr/local/etc/xml/catalog
           ls -lah /opt/homebrew/etc/xml/catalog
 
-      - name: Resolve VERSION safely (POSIX debug)
+      - name: Resolve Git VERSION
         id: ver
+        shell: bash
         run: |
-          set -euxo pipefail
-          echo "Raw output from bin/latest-git-version:"
-          bin/latest-git-version || true
-          # Parse first X.Y.Z from whatever it prints
-          VER="$(bin/latest-git-version 2>/dev/null | tr -d '\r' | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+          set -euo pipefail
+          # Try the repo script first (ignore failures)
+          RAW="$(bin/latest-git-version 2>/dev/null || true)"
+          echo "latest-git-version output: ${RAW}"
+          VER="$(printf "%s\n" "$RAW" | tr -d '\r' | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+
+          # Fallback: parse from kernel.org directory listing
           if [[ -z "$VER" ]]; then
-            # Fallback: avoid relying on the script at all
-            # (Still no repo changes; just use a known tag or fail clearly)
-            echo "Failed to parse VERSION from bin/latest-git-version output" >&2
+            VER="$(curl -fsSL "https://www.kernel.org/pub/software/scm/git/" \
+              | grep -Eo 'git-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz' \
+              | sed 's/^git-//; s/\.tar\.gz$//' \
+              | sort -V \
+              | tail -n1 || true)"
+          fi
+
+          if [[ -z "$VER" ]]; then
+            echo "ERROR: Unable to resolve Git version." >&2
             exit 1
           fi
+
           echo "Resolved VERSION=$VER"
           echo "VERSION=$VER" >> "$GITHUB_OUTPUT"
 
-      - name: Build installer package (force GNU make, override VERSION)
+      - name: Build package
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.VERSION }}
         run: |
-          set -euxo pipefail
-          "$HOME/gmake/bin/make" clean VERSION='${{ steps.ver.outputs.VERSION }}' || true
-          "$HOME/gmake/bin/make" package VERSION='${{ steps.ver.outputs.VERSION }}'
+          set -euo pipefail
+          "$HOME/gmake/bin/make" clean VERSION="$VERSION" || true
+          "$HOME/gmake/bin/make" package VERSION="$VERSION"
 
-      - name: List outputs
-        if: always()
-        run: |
-          set -euxo pipefail
-          ls -lah
-          ls -lah build || true
-          ls -lah tmp || true
-          ls -lah stage || true
-          ls -lah stage-arm || true
-          ls -lah stage-intel || true
-
-      - name: Upload artifacts (pkg/dmg/zip)
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: git-osx-installer
