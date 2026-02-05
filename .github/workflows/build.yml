@@ -108,7 +108,6 @@ jobs:
           OPENSSL_INC="-I${OPENSSL_PREFIX}/include"
           OPENSSL_LIB="-L${OPENSSL_PREFIX}/lib"
           KEYCHAIN_LINK="-lz -liconv -framework Security -framework CoreFoundation -lssl -lcrypto"
-
           "$HOME/gmake/bin/make" clean VERSION="$VERSION" || true
           "$HOME/gmake/bin/make" package VERSION="$VERSION" \
             CFLAGS_arm="-target arm64-apple-macos11 ${OPENSSL_INC}" \
@@ -123,29 +122,27 @@ jobs:
           OPENSSL_PREFIX: ${{ env.OPENSSL_PREFIX }}
         run: |
           set -euo pipefail
-          OPENSSL_LIBDIR="${OPENSSL_PREFIX}/lib"
-
           STAGE_ROOT="$(pwd)/stage/git-${VERSION}"
           GIT_PREFIX="/usr/local/git"
           BIN_DIR="${STAGE_ROOT}${GIT_PREFIX}/bin"
           CORE_DIR="${STAGE_ROOT}${GIT_PREFIX}/libexec/git-core"
           LIB_DIR="${STAGE_ROOT}${GIT_PREFIX}/lib"
 
-          mkdir -p "$LIB_DIR"
-          cp -f "${OPENSSL_LIBDIR}/libssl.3.dylib" "$LIB_DIR/"
-          cp -f "${OPENSSL_LIBDIR}/libcrypto.3.dylib" "$LIB_DIR/"
+          sudo mkdir -p "$LIB_DIR"
+          sudo cp -f "${OPENSSL_PREFIX}/lib/libssl.3.dylib" "$LIB_DIR/"
+          sudo cp -f "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" "$LIB_DIR/"
 
-          install_name_tool -id "@rpath/libssl.3.dylib" "$LIB_DIR/libssl.3.dylib"
-          install_name_tool -id "@rpath/libcrypto.3.dylib" "$LIB_DIR/libcrypto.3.dylib"
+          sudo install_name_tool -id "@rpath/libssl.3.dylib" "$LIB_DIR/libssl.3.dylib"
+          sudo install_name_tool -id "@rpath/libcrypto.3.dylib" "$LIB_DIR/libcrypto.3.dylib"
 
           fix_one() {
             local f="$1"
             if [[ -f "$f" ]] && file "$f" | grep -q "Mach-O"; then
-              install_name_tool -add_rpath "${GIT_PREFIX}/lib" "$f" 2>/dev/null || true
-              install_name_tool -change "${OPENSSL_PREFIX}/lib/libssl.3.dylib" "@rpath/libssl.3.dylib" "$f" 2>/dev/null || true
-              install_name_tool -change "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" "@rpath/libcrypto.3.dylib" "$f" 2>/dev/null || true
-              install_name_tool -change "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib" "@rpath/libssl.3.dylib" "$f" 2>/dev/null || true
-              install_name_tool -change "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib" "@rpath/libcrypto.3.dylib" "$f" 2>/dev/null || true
+              sudo install_name_tool -add_rpath "${GIT_PREFIX}/lib" "$f" 2>/dev/null || true
+              sudo install_name_tool -change "${OPENSSL_PREFIX}/lib/libssl.3.dylib" "@rpath/libssl.3.dylib" "$f" 2>/dev/null || true
+              sudo install_name_tool -change "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" "@rpath/libcrypto.3.dylib" "$f" 2>/dev/null || true
+              sudo install_name_tool -change "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib" "@rpath/libssl.3.dylib" "$f" 2>/dev/null || true
+              sudo install_name_tool -change "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib" "@rpath/libcrypto.3.dylib" "$f" 2>/dev/null || true
             fi
           }
 
@@ -163,7 +160,6 @@ jobs:
             done < <(find "$BIN_DIR" -type f -maxdepth 1 -print0)
           fi
 
-          echo "Check dylib linkage (git):"
           otool -L "${BIN_DIR}/git" || true
 
       - name: Rebuild pkg from fixed stage
@@ -173,7 +169,7 @@ jobs:
         run: |
           set -euo pipefail
           STAGE_ROOT="$(pwd)/stage/git-${VERSION}"
-          rm -f "git-${VERSION}.pkg"
+          sudo rm -f "git-${VERSION}.pkg"
           pkgbuild --identifier com.git.pkg --version "${VERSION}" --root "${STAGE_ROOT}/usr/local" --install-location "/usr/local" "git-${VERSION}.pkg"
           ls -lah "git-${VERSION}.pkg"
 
