@@ -23,33 +23,33 @@ jobs:
           xcode-select -p || true
           clang --version || true
           make --version || true
+          command -v brew || true
+          command -v git || true
 
-      - name: Debug Makefile around the failing line
+      # Key fix: Makefile evals XML_CATALOG_FILES at parse-time via bin/find-file.
+      # Provide a catalog path so parsing doesn't explode.
+      - name: Provide xml catalog file for Makefile
         run: |
           set -euxo pipefail
-          nl -ba Makefile | sed -n '35,55p'
+          sudo mkdir -p /usr/local/etc/xml
+          sudo touch /usr/local/etc/xml/catalog
+          ls -lah /usr/local/etc/xml/catalog
 
-      - name: Build installer package (override XML_CATALOG_FILES)
+      - name: Build installer package
         run: |
           set -euxo pipefail
-          make clean XML_CATALOG_FILES= || true
-          make package XML_CATALOG_FILES=
+          make clean || true
+          make package
 
       - name: List outputs
         if: always()
         run: |
           set -euxo pipefail
-          echo "=== repo root ==="
           ls -lah
-          echo "=== build/ ==="
           ls -lah build || true
-          echo "=== tmp/ ==="
           ls -lah tmp || true
-          echo "=== stage/ ==="
           ls -lah stage || true
-          echo "=== stage-arm/ ==="
           ls -lah stage-arm || true
-          echo "=== stage-intel/ ==="
           ls -lah stage-intel || true
 
       - name: Upload artifacts (pkg/dmg/zip)
