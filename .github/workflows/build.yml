@@ -15,29 +15,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show environment
+      - name: Show toolchain
         run: |
           set -euxo pipefail
           sw_vers
           uname -a
+          /usr/bin/make -v || true
+          /usr/bin/make --version || true
           xcode-select -p || true
           clang --version || true
-          make --version || true
-          command -v brew || true
-          command -v git || true
 
-      # Key fix: Makefile evals XML_CATALOG_FILES at parse-time via bin/find-file.
-      # Provide a catalog path so parsing doesn't explode.
-      - name: Provide xml catalog file for Makefile
+      # Install GNU make without Homebrew (runner may not have brew in PATH)
+      - name: Build and install GNU make (local)
         run: |
           set -euxo pipefail
-          sudo mkdir -p /usr/local/etc/xml
-          sudo touch /usr/local/etc/xml/catalog
-          ls -lah /usr/local/etc/xml/catalog
+          MAKE_VER="4.4.1"
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o make.tar.gz "https://ftp.gnu.org/gnu/make/make-${MAKE_VER}.tar.gz"
+          tar xzf make.tar.gz
+          cd "make-${MAKE_VER}"
+          ./configure --prefix="$HOME/gmake"
+          /usr/bin/make -j"$(sysctl -n hw.ncpu)"
+          /usr/bin/make install
+          echo "$HOME/gmake/bin" >> "$GITHUB_PATH"
+          "$HOME/gmake/bin/make" --version
 
-      - name: Build installer package
+      # Optional: show Makefile lines around 43 (for sanity/debug)
+      - name: Debug Makefile line 35-55
         run: |
           set -euxo pipefail
+          nl -ba Makefile | sed -n '35,55p'
+
+      - name: Build installer package (GNU make)
+        run: |
+          set -euxo pipefail
+          make --version
           make clean || true
           make package
 
@@ -61,11 +73,5 @@ jobs:
             git-*.dmg
             git-*.zip
             build/**/*.pkg
-            build/**/*.dmg
-            build/**/*.zip
             tmp/**/*.pkg
-            tmp/**/*.dmg
-            tmp/**/*.zip
             stage/**/*.pkg
-            stage/**/*.dmg
-            stage/**/*.zip
